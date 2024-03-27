@@ -349,6 +349,10 @@
   "mod-settings.o" ;; added
   "mod-common-functions.o" ;; added
   "orb-placer.o" ;; added
+  "multiplayer-settings.o"
+  "multiplayer-h.o"
+  "multiplayer.o"
+
   "mod-custom-code.o" ;; added
   "mod-debug.o" ;; added
   ;; keep zoomer stuff loaded

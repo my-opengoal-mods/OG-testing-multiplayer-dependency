@@ -1,0 +1,24 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: multiplayer-h.gc
+;; name in dgo: multiplayer-h
+;; dgos: GAME, ENGINE
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Purpose
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+#|
+This file is compiled first just to forward declare whatever we need, more targets, a place to store them, functions to retreive them etc.
+|#
+
+;; For multiplayer
+(define *target-list* (new 'global 'boxed-array handle 4))
+
+(defun get-target ((tgt-idx int))
+  (if (zero? (-> *target-list* tgt-idx))
+    (the-as target #f)
+    (the-as target (handle->process (-> *target-list* tgt-idx)))
+    )
+  )

@@ -1,0 +1,18 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: multiplayer-settings.gc
+;; name in dgo: multiplayer-settings
+;; dgos: GAME, ENGINE
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Purpose
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+#|
+This file is compiled first just to set whatever settings they might want to toggle for the mod.
+|#
+
+(define  *local-mode* #t)
+(define *team-runs-mode* #f)
+(define *http-mode* #f)

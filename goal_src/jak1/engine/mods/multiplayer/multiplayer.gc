@@ -1,0 +1,291 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: multiplayer.gc
+;; name in dgo: multiplayer
+;; dgos: GAME, ENGINE
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Purpose
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+#|
+This file is compiled AFTER the main game files, just to redefine and change whatever we need, more targets, a place to store them, functions to retreive them etc.
+|#
+
+;;Spawn a new target process
+
+
+
+;; fuckign clean this up you idiot
+ ;; a few pools of fixed size processes that are shared.
+ (define *16k-dead-pool* (new 'global 'dead-pool 4 (* 16 1024) '*16k-dead-pool*))
+ (define *8k-dead-pool* (new 'global 'dead-pool 1 (* 8 1024) '*8k-dead-pool*))
+ (define *4k-dead-pool* (new 'global 'dead-pool 4 (* 4 1024) '*4k-dead-pool*))
+
+ ;; some very important process pools
+ (define *target-dead-pool* (new 'global 'dead-pool 4 (* 48 1024) '*target-dead-pool*))
+ (define *camera-dead-pool* (new 'global 'dead-pool 7 (* 4 1024) '*camera-dead-pool*))
+ (define *camera-master-dead-pool* (new 'global 'dead-pool 1 (* 8 1024) '*camera-master-dead-pool*))
+
+;; used if other pools run out of space in debug mode
+(if *debug-segment*
+    (define *debug-dead-pool* (new 'debug 'dead-pool-heap '*debug-dead-pool* 768 (* 1024 1024)))
+    )
+
+;; variable sized actor pool (most actors go here)
+(define *nk-dead-pool* (new 'global 'dead-pool-heap '*nk-dead-pool* (* PROCESS_HEAP_MULT 768) PROCESS_HEAP_SIZE))
+
+;; use the nk-dead-pool in most places
+(define *default-dead-pool* (the dead-pool *nk-dead-pool*))
+(define *pickup-dead-pool* (the dead-pool *nk-dead-pool*))
+
+
+
+(defun start-extra-target ((idx int))
+  (process-spawn
+                target
+                :init init-target
+                  (-> *game-info* current-continue) idx
+                :from *target-dead-pool*
+                :to *target-pool*
+                :stack *kernel-dram-stack*
+                )
+  )
+
+;;These return true if the specified target is currently "alive".
+(defun target-alive? ((tgt target))
+  (and tgt
+    (not (or (= (-> tgt state) #f) (= (-> tgt state) symbol)))
+    )
+  )
+
+(defun extra-target-alive? ()
+  (dotimes (tgt-idx (-> *target-list* length))
+    (if (and (> tgt-idx 0) (target-alive? (get-target tgt-idx)))
+      (return #t)
+      )
+    )
+  #f
+  )
+
+(define *CLOSEST-TARGET* (the-as target #f))
+(defun get-closest-target ((obj process-drawable))
+  (dotimes (tgt-idx (-> *target-list* length))
+    (if (and (> tgt-idx 0) (target-alive? (get-target tgt-idx)))
+      (set! *CLOSEST-TARGET* *target*)
+
+
+      (if (> (vector-vector-distance (-> (get-target tgt-idx) root trans) (-> obj root trans) ) (vector-vector-distance (-> *CLOSEST-TARGET* root trans) (-> obj root trans) ) )
+
+      (set! *CLOSEST-TARGET* (get-target tgt-idx))
+
+      )
+      )
+    )
+  #f
+  (-> *CLOSEST-TARGET* root trans)
+  )
+
+(defun warp-jakA-to-jakB ((jakA target) (jakB target))
+      (set! (-> (-> jakA root) trans x) (-> (-> jakB root) trans x))
+      (set! (-> (-> jakA root) trans y) (-> (-> jakB root) trans y))
+      (set! (-> (-> jakA root) trans z) (-> (-> jakB root) trans z))
+)
+
+
+  (defun localmulti-start ((tgt-idx int))
+  (let ((tgt (get-target tgt-idx)))
+    (when (> tgt-idx 0)
+      (if (target-alive? tgt)
+        (begin
+          ;; despawn target
+          (deactivate tgt)
+          (set! (-> *target-list* tgt-idx) (the-as handle #f))
+          )
+        (begin
+          ;; spawn new target
+          (set! tgt (-> (start-extra-target tgt-idx) 0))
+          (warp-jakA-to-jakB tgt *target*)
+          (set! (-> *target-list* tgt-idx) (process->handle tgt))
+          (case tgt-idx
+            ((1) (draw-green tgt))
+            ((2) (draw-red tgt))
+            ((3) (draw-blue tgt))
+            )
+
+            ;; I dont understand the new controller stuff but this gives tgt 1 a controller. Add more cases when get more testers
+            (pc-set-controller! 0 1)
+            (pc-set-controller! 1 0)
+            (pc-set-controller! 2 2)
+            (pc-set-controller! 3 3)
+
+           (if (not (= tgt *target*))
+                     (set! (-> tgt control unknown-cpad-info00) (-> *cpad-list* cpads tgt-idx))
+           )
+
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+;; Spawn targets up to and including target x
+(defun localmulti-start-all ((x int))
+  (dotimes (tgt-idx x)
+    (localmulti-start tgt-idx)
+    )
+  )
+
+
+(defun multiplayer-run-every-frame ()
+
+  (when (and
+          (extra-target-alive?)
+          (!= (-> *camera* drawable-target) *target*)
+          (!= (-> *target* state name) 'target-pole-cycle)
+          )
+    (set! (-> *camera* drawable-target) (the-as handle *target*))
+    )
+
+
+(none)
+)
+
+
+
+;; Dont touch stuff below this line....
+
+
+(defbehavior init-target target ((arg0 continue-point))
+  (set-setting! 'allow-pause #f 0.0 0)
+  (set-setting! 'allow-progress #f 0.0 0)
+  (apply-settings *setting-control*)
+  (if (not arg0)
+      (set! arg0 (get-or-create-continue! *game-info*))
+      )
+  (set-continue! *game-info* arg0)
+  (stack-size-set! (-> self main-thread) 1024)
+  (logior! (-> self mask) (process-mask target))
+  (set! (-> self state-hook) (the-as (function none :behavior target) nothing))
+  (let ((s5-0 (new 'process 'control-info self (collide-list-enum player))))
+    (set! (-> self control) s5-0)
+    (set! (-> s5-0 dynam) (copy *standard-dynamics* 'process))
+    (set! (-> s5-0 max-iteration-count) (the-as uint 8))
+    (set! (-> s5-0 event-self) 'touched)
+    (set! (-> s5-0 reaction) target-collision-reaction)
+    (set! (-> s5-0 no-reaction) target-collision-no-reaction)
+    (let ((s4-0 (new 'process 'collide-shape-prim-group s5-0 (the-as uint 6) 1)))
+      (set! (-> s4-0 prim-core collide-as) (collide-kind target))
+      (set! (-> s4-0 collide-with)
+            (collide-kind background cak-1 cak-2 cak-3 water powerup crate enemy wall-object ground-object mother-spider)
+            )
+      (set! (-> s4-0 prim-core offense) (collide-offense touch))
+      (set! (-> s4-0 prim-core action) (collide-action solid rider-target))
+      (set-root-prim! s5-0 s4-0)
+      (let ((s3-0 (new 'process 'collide-shape-prim-sphere s5-0 (the-as uint 6))))
+        (set! (-> s3-0 prim-core action) (collide-action solid rider-target))
+        (set! (-> s3-0 prim-core collide-as) (collide-kind target))
+        (set! (-> s3-0 collide-with)
+              (collide-kind background cak-1 cak-2 cak-3 water powerup crate enemy wall-object ground-object mother-spider)
+              )
+        (set! (-> s3-0 prim-core offense) (collide-offense touch))
+        (append-prim s4-0 s3-0)
+        (set! (-> s5-0 unknown-sphere-array00 0) s3-0)
+        )
+      (let ((s3-1 (new 'process 'collide-shape-prim-sphere s5-0 (the-as uint 10))))
+        (set! (-> s3-1 prim-core action) (collide-action solid))
+        (set! (-> s3-1 prim-core collide-as) (collide-kind target))
+        (set! (-> s3-1 collide-with)
+              (collide-kind background cak-1 cak-2 cak-3 water powerup crate enemy wall-object ground-object mother-spider)
+              )
+        (set! (-> s3-1 prim-core offense) (collide-offense touch))
+        (append-prim s4-0 s3-1)
+        (set! (-> s5-0 unknown-sphere-array00 1) s3-1)
+        )
+      (let ((s3-2 (new 'process 'collide-shape-prim-sphere s5-0 (the-as uint 18))))
+        (set! (-> s3-2 prim-core action) (collide-action solid))
+        (set! (-> s3-2 prim-core collide-as) (collide-kind target))
+        (set! (-> s3-2 collide-with)
+              (collide-kind background cak-1 cak-2 cak-3 water powerup crate enemy wall-object ground-object mother-spider)
+              )
+        (set! (-> s3-2 prim-core offense) (collide-offense touch))
+        (append-prim s4-0 s3-2)
+        (set! (-> s5-0 unknown-sphere-array00 2) s3-2)
+        )
+      (let ((s3-3 (new 'process 'collide-shape-prim-sphere s5-0 (the-as uint 32))))
+        (append-prim s4-0 s3-3)
+        (set! (-> s5-0 unknown-sphere00) s3-3)
+        )
+      (let ((s3-4 (new 'process 'collide-shape-prim-sphere s5-0 (the-as uint 64))))
+        (append-prim s4-0 s3-4)
+        (set! (-> s5-0 unknown-sphere01) s3-4)
+        )
+      (let ((s3-5 (new 'process 'collide-shape-prim-sphere s5-0 (the-as uint 128))))
+        (append-prim s4-0 s3-5)
+        (set! (-> s5-0 unknown-sphere02) s3-5)
+        )
+      )
+    )
+  (target-collide-set! 'normal 0.0)
+  (backup-collide-with-as (-> self control))
+  (set! (-> self game) *game-info*)
+  (move-to-point! (-> self control) (-> arg0 trans))
+  (set! (-> (&-> (-> self control) unknown-qword00) 0) (-> arg0 trans quad))
+  (set! (-> self control unknown-cpad-info00) (-> *cpad-list* cpads 0))
+  (set! (-> self control unknown-surface01) (new 'process 'surface))
+  (set! (-> self control unknown-surface01 name) 'current)
+  (set! (-> self control unknown-surface01 active-hook) nothing)
+  (set! (-> self control unknown-surface01 touch-hook) nothing)
+  (initialize-skeleton self *jchar-sg* '())
+  (set! (-> self draw origin-joint-index) (the-as uint 33))
+  (set! (-> self draw shadow-joint-index) (the-as uint 33))
+  (let ((v1-79 (-> self node-list data)))
+    (set! (-> v1-79 0 param0) cspace<-transformq+trans!)
+    (set! (-> v1-79 0 param1) (the-as basic (-> self control trans)))
+    (set! (-> v1-79 0 param2) (the-as basic (-> self control unknown-vector12)))
+    )
+  (set! (-> self draw lod-set max-lod) 0)
+  (logior! (-> self skel status) (janim-status inited eye))
+  (set! (-> self draw shadow-ctrl) *target-shadow-control*)
+  (set! (-> self control unknown-cspace00 parent) (joint-node eichar-lod0-jg lindA))
+  (set! (-> self control unknown-cspace00 joint) (the-as joint (joint-node eichar-lod0-jg rindA)))
+  (set! (-> self control unknown-cspace00 joint) (the-as joint (joint-node eichar-lod0-jg rindA)))
+  (set! (-> self control unknown-cspace10 parent) (joint-node eichar-lod0-jg LshoulderPad))
+  (set! (-> self neck) (new 'process 'joint-mod (joint-mod-handler-mode look-at) self 7))
+  (set! (-> self fact)
+        (new 'process 'fact-info-target self (pickup-type eco-pill-random) (-> *FACT-bank* default-pill-inc))
+        )
+  (set! (-> self sound) (new 'process 'ambient-sound 'none (-> self control trans)))
+  (set! (-> self control unknown-soundid00) (new-sound-id))
+  (if *debug-segment*
+      (add-connection *debug-engine* self target-print-stats self *stdcon0* #f)
+      )
+
+#|
+PATCH NOTE - If we try to render multiple huds it crashes, and is also very pointless so no need to try to fix, only activate the hud, if the main jak doesnt exist. This prevents the other jaks from getting their HUD and causing crash
+|#
+    (when (not *target*)
+    (test-boop)
+    (activate-hud self)
+    (set! (-> self fp-hud) (the-as handle #f))
+    )
+  ;;(activate-hud self)
+  (set! (-> self fp-hud) (the-as handle #f))
+  ;; og:preserve-this PAL patch here
+  (set! (-> self burn-proc) (the-as handle #f))
+  (set! (-> self water) (new 'process 'water-control self 9 0.0 8192.0 2048.0))
+  (set! (-> self water flags) (water-flags wt04 wt05 wt06 wt07 wt22))
+  (reset-target-state #t)
+  (set! (-> self control unknown-vector52 quad) (-> self control trans quad))
+  (+! (-> self control unknown-vector52 y) -819200.0)
+  (set! (-> self align) (new 'process 'align-control self))
+  (set! (-> self sidekick) (process-spawn sidekick :init init-sidekick :from *16k-dead-pool* :to self))
+  (set! (-> self manipy) (the-as (pointer manipy) #f))
+  (set! (-> self event-hook) target-generic-event-handler)
+  (set! (-> self current-level) #f)
+  (level-setup)
+  (go target-continue arg0)
+  (none)
+  )

@@ -1727,7 +1727,7 @@
  :deps
  ("$OUT/obj/display.o"
   "$OUT/obj/decomp-h.o")
- 
+
  "engine/connect.gc"
  "ui/text-h.gc"
  "game/settings-h.gc"
@@ -2091,6 +2091,9 @@
  "mods/mod-common-functions.gc"
  "mods/mod-custom-code.gc"
  "mods/mod-debug.gc"
+ "mods/multiplayer/multiplayer-settings.gc"
+ "mods/multiplayer/multiplayer-h.gc"
+ "mods/multiplayer/multiplayer.gc"
 )
 
 (group-list "all-code"
