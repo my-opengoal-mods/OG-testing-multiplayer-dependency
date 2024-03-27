@@ -22,3 +22,12 @@ This file is compiled first just to forward declare whatever we need, more targe
     (the-as target (handle->process (-> *target-list* tgt-idx)))
     )
   )
+
+(define *master-camera-list* (new 'global 'boxed-array handle 4))
+
+(defun get-camera ((tgt-idx int))
+  (if (zero? (-> *master-camera-list* tgt-idx))
+    (the-as camera-master #f)
+    (the-as camera-master (handle->process (-> *master-camera-list* tgt-idx)))
+    )
+  )

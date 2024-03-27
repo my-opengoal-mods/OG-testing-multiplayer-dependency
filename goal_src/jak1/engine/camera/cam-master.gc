@@ -1341,7 +1341,7 @@
           ((= v1-0 'slave-activated)
            (set! v0-0
                  (cond
-                   ((< (-> self num-slaves) 2)
+                   ((< (-> self num-slaves) 8)
                     (set! (-> self slave (-> self num-slaves))
                           (the-as (pointer camera-slave) (process->ppointer (the-as process (-> block param 0))))
                           )

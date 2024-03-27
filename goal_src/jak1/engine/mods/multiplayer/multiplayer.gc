@@ -25,8 +25,8 @@ This file is compiled AFTER the main game files, just to redefine and change wha
 
  ;; some very important process pools
  (define *target-dead-pool* (new 'global 'dead-pool 4 (* 48 1024) '*target-dead-pool*))
- (define *camera-dead-pool* (new 'global 'dead-pool 7 (* 4 1024) '*camera-dead-pool*))
- (define *camera-master-dead-pool* (new 'global 'dead-pool 1 (* 8 1024) '*camera-master-dead-pool*))
+ (define *camera-dead-pool* (new 'global 'dead-pool 21 (* 4 1024) '*camera-dead-pool*))
+ (define *camera-master-dead-pool* (new 'global 'dead-pool 4 (* 8 1024) '*camera-master-dead-pool*))
 
 ;; used if other pools run out of space in debug mode
 (if *debug-segment*
@@ -53,10 +53,26 @@ This file is compiled AFTER the main game files, just to redefine and change wha
                 )
   )
 
+  (defun start-extra-camera ((idx int))
+  (process-spawn
+                camera-master
+                :init cam-master-init
+                :from *camera-master-dead-pool*
+                :to *active-pool*
+                :stack *kernel-dram-stack*
+                )
+  )
+
 ;;These return true if the specified target is currently "alive".
 (defun target-alive? ((tgt target))
   (and tgt
     (not (or (= (-> tgt state) #f) (= (-> tgt state) symbol)))
+    )
+  )
+
+(defun camera-alive? ((cam camera-master))
+  (and cam
+    (not (or (= (-> cam state) #f) (= (-> cam state) symbol)))
     )
   )
 
@@ -131,10 +147,53 @@ This file is compiled AFTER the main game files, just to redefine and change wha
   (none)
   )
 
+(defun localmulti-cam-start ((tgt-idx int))
+  (let ((tgt (get-camera tgt-idx)))
+    (when (> tgt-idx 0)
+      (if (camera-alive? tgt)
+        (begin
+          ;; despawn target
+          (deactivate tgt)
+          (set! (-> *master-camera-list* tgt-idx) (the-as handle #f))
+          )
+        (begin
+          ;; spawn new target
+          (set! tgt (-> (start-extra-camera tgt-idx) 0))
+          ;;(warp-jakA-to-jakB tgt *target*)
+          (set! (-> *master-camera-list* tgt-idx) (process->handle tgt))
+          ;; (case tgt-idx
+          ;;   ((1) (draw-green tgt))
+          ;;   ((2) (draw-red tgt))
+          ;;   ((3) (draw-blue tgt))
+          ;;   )
+
+            ;; I dont understand the new controller stuff but this gives tgt 1 a controller. Add more cases when get more testers
+            ;; (pc-set-controller! 0 1)
+            ;; (pc-set-controller! 1 0)
+            ;; (pc-set-controller! 2 2)
+            ;; (pc-set-controller! 3 3)
+
+          ;;  (if (not (= tgt *target*))
+          ;;            (set! (-> tgt control unknown-cpad-info00) (-> *cpad-list* cpads tgt-idx))
+          ;;  )
+
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 ;; Spawn targets up to and including target x
 (defun localmulti-start-all ((x int))
   (dotimes (tgt-idx x)
     (localmulti-start tgt-idx)
+    )
+  )
+
+  (defun localmulti-start-all-cam ((x int))
+  (dotimes (tgt-idx x)
+    (localmulti-cam-start tgt-idx)
     )
   )
 
@@ -264,7 +323,7 @@ This file is compiled AFTER the main game files, just to redefine and change wha
       )
 
 #|
-PATCH NOTE - If we try to render multiple huds it crashes, and is also very pointless so no need to try to fix, only activate the hud, if the main jak doesnt exist. This prevents the other jaks from getting their HUD and causing crash
+PATCH NOTE - If we try to render multiple huds it crashes, and is also very pointless so no need to try to fix, only activate the hud, if the main jak doesnt exist. This prevents the other jaks from getting their HUD and causing crashes
 |#
     (when (not *target*)
     (test-boop)
@@ -288,4 +347,61 @@ PATCH NOTE - If we try to render multiple huds it crashes, and is also very poin
   (level-setup)
   (go target-continue arg0)
   (none)
+  )
+
+  (defun target-cam-pos-1 ()
+  (let ((gp-0 (get-target 1)))
+    (the-as
+      vector
+      (cond
+        ((not gp-0)
+         (camera-pos)
+         )
+        ((logtest? (-> gp-0 state-flags) (state-flags use-alt-cam-pos))
+         (add-debug-sphere
+           *display-camera-marks*
+           (bucket-id debug-no-zbuf)
+           (-> gp-0 alt-cam-pos)
+           819.2
+           (new 'static 'rgba :r #xff :a #x80)
+           )
+         (-> gp-0 alt-cam-pos)
+         )
+        ((logtest? (state-flags has-saved-position) (-> gp-0 state-flags))
+         (add-debug-sphere
+           *display-camera-marks*
+           (bucket-id debug-no-zbuf)
+           (-> gp-0 alt-cam-pos)
+           819.2
+           (new 'static 'rgba :r #xff :a #x80)
+           )
+         (-> gp-0 alt-cam-pos)
+         )
+        ((logtest? (state-flags falling-into-pool-of-bad) (-> gp-0 state-flags))
+         (let ((s5-0 (the-as object (new 'static 'vector))))
+           (set! (-> (the-as vector s5-0) quad) (-> (&-> (-> gp-0 control) unknown-qword00) 0))
+           (set! (-> (the-as vector s5-0) y) (fmax (-> (the-as vector s5-0) y) (-> gp-0 alt-cam-pos y)))
+           (add-debug-sphere
+             *display-camera-marks*
+             (bucket-id debug-no-zbuf)
+             (the-as vector s5-0)
+             819.2
+             (new 'static 'rgba :r #xff :a #x80)
+             )
+           s5-0
+           )
+         )
+        (else
+          (add-debug-sphere
+            *display-camera-marks*
+            (bucket-id debug-no-zbuf)
+            (the-as vector (&-> (-> gp-0 control) unknown-qword00))
+            819.2
+            (new 'static 'rgba :r #xff :a #x80)
+            )
+          (&-> (-> gp-0 control) unknown-qword00)
+          )
+        )
+      )
+    )
   )
